@@ -29,6 +29,7 @@ export interface EditorProps {
   insertSpaces: boolean;
   ignoreTabKey: boolean;
   placeholder: string;
+  wordWrap: boolean;
 }
 export interface Record {
   value: string;
@@ -79,6 +80,10 @@ export const PrismEditor = Vue.extend({
       type: String,
       default: '',
     },
+    wordWrap: {
+      type: Boolean,
+      default: false,
+    }
   },
   data() {
     return {
@@ -110,6 +115,13 @@ export const PrismEditor = Vue.extend({
             this.setLineNumbersHeight();
           });
         }
+        this.$nextTick(() => {
+          if (!this.wordWrap) {
+            this.updateTextareaDimensions();
+          } else {
+            this.updateLineNumbersMarginTop();
+          }
+        })
       },
     },
     lineNumbers(): void {
@@ -117,6 +129,28 @@ export const PrismEditor = Vue.extend({
         this.styleLineNumbers();
         this.setLineNumbersHeight();
       });
+    },
+    wordWrap (bool: boolean): void {
+      if (bool) {
+        const textarea = document.querySelector('.prism-editor__textarea') as HTMLTextAreaElement
+
+        if (textarea) {
+          textarea.style.width = '100%'
+          textarea.style.height = '100%'
+        }
+
+        this.$nextTick(() => {
+          this.updateLineNumbersMarginTop();
+        })
+      } else {
+        const allLineNumbers = document.querySelectorAll('.prism-editor__line-number') as NodeListOf<HTMLDivElement>
+
+        if (allLineNumbers) {
+          allLineNumbers.forEach((e) => {
+            e.style.marginTop = '0'
+          })
+        }
+      }
     },
   },
   computed: {
@@ -136,6 +170,11 @@ export const PrismEditor = Vue.extend({
   mounted() {
     this._recordCurrentState();
     this.styleLineNumbers();
+    if (!this.wordWrap) {
+      this.updateTextareaDimensions();
+    } else {
+      this.updateLineNumbersMarginTop();
+    }
   },
 
   methods: {
@@ -511,6 +550,97 @@ export const PrismEditor = Vue.extend({
         this.capture = !this.capture;
       }
     },
+
+    updateTextareaDimensions(): void {
+      const textarea = document.querySelector('.prism-editor__textarea') as HTMLTextAreaElement;
+      const pre = document.querySelector('.prism-editor__editor') as HTMLPreElement;
+      
+      if (textarea && pre) {
+        const { width, height } = pre.getBoundingClientRect();
+      
+        textarea.style.width = `${width}px`;
+        textarea.style.height = `${height}px`;
+      }
+    },
+
+    getLinesToNextLineBreak (line: number): number {
+      let index = line - 1
+      const range = document.createRange()
+      
+      const editor = document.querySelector('.prism-editor__editor')
+
+      if (!editor) return 0
+
+      range.setStart(editor.childNodes[0], 0)
+      
+      const children = Array.from(editor.childNodes).slice(0, -1)
+
+      let counter = 0
+      let position;
+      
+      for (const child of children) {
+        if (child.nodeName == '#text' && child.nodeValue) {
+          const rowBreakIndexes = this.getIndexes('\n', child.nodeValue)
+
+          counter += rowBreakIndexes.length
+
+          if (counter >= index) {
+            position = rowBreakIndexes[index - 1]
+            range.setEnd(child, position)
+            break
+          }
+        }
+      }
+
+      const clientRects = range.getClientRects()
+      return Math.ceil(clientRects[clientRects.length - 1].top / 21)
+    },
+
+    updateLineNumbersMarginTop () {
+      const lineNumbers = document.querySelectorAll('.prism-editor__line-number')
+      
+      if (lineNumbers && lineNumbers.length > 1) {
+        const lineNumbersArr = Array.from(lineNumbers) as HTMLDivElement[]
+    
+        lineNumbersArr.forEach((element, index, arr) => {
+          const line = index + 1
+          const location = this.getLinesToNextLineBreak(line)
+          console.log(`LINE: ${line} LINES TO NEXT LINE BREAK: ${location}`)
+          
+          if (line !== 1) {
+            const beforeElementsMarginTopSum = arr.slice(0, index)
+              .reduce((a, c) => a + parseInt(window.getComputedStyle(c).marginTop, 10), 0)
+
+            const finalMarginTop = location * 21 - index * 21 - beforeElementsMarginTopSum
+
+            if (finalMarginTop > 0) {
+              element.style.marginTop = `${finalMarginTop}px`
+            } else {
+              element.style.marginTop = `0px`
+            }
+
+            console.log(`LINE ${line} MARGIN TOP: ${finalMarginTop}px`)
+          }
+        })
+      }
+    },
+
+    getIndexes(searchStr: string, str: string, caseSensitive?: boolean): number[] {
+      const searchStrLen = searchStr.length;
+      if (searchStrLen == 0) {
+          return [];
+      }
+      let startIndex = 0, index, indexes = [];
+      if (!caseSensitive) {
+          str = str.toLowerCase();
+          searchStr = searchStr.toLowerCase();
+      }
+      while ((index = str.indexOf(searchStr, startIndex)) > -1) {
+          indexes.push(index);
+          startIndex = index + searchStrLen;
+      }
+      return indexes;
+  }
   },
   render(h): VNode {
     const lineNumberWidthCalculator = h(
@@ -563,6 +693,7 @@ export const PrismEditor = Vue.extend({
       staticClass: 'prism-editor__textarea',
       class: {
         'prism-editor__textarea--empty': this.isEmpty,
+        'prism-editor__texarea--word-wrap': this.wordWrap,
       },
       attrs: {
         spellCheck: 'false',
@@ -581,6 +712,9 @@ export const PrismEditor = Vue.extend({
     const preview = h('pre', {
       ref: 'pre',
       staticClass: 'prism-editor__editor',
+      class: {
+        'prism-editor__editor--word-wrap': this.wordWrap,
+      },
       attrs: {
         'data-testid': 'preview',
       },
@@ -588,7 +722,10 @@ export const PrismEditor = Vue.extend({
         innerHTML: this.content,
       },
     });
-    const editorContainer = h('div', { staticClass: 'prism-editor__container' }, [textarea, preview]);
+    const editorContainer = h('div', {
+      staticClass: 'prism-editor__container',
+      class: { 'prism-editor__container--word-wrap': this.wordWrap },
+    }, [textarea, preview]);
     return h('div', { staticClass: 'prism-editor-wrapper' }, [this.lineNumbers && lineNumbers, editorContainer]);
   },
 });
